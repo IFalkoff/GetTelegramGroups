@@ -1,14 +1,13 @@
-import asyncio
 import os
+
 from dotenv import load_dotenv
 from telethon import TelegramClient
-from telethon.tl.types import Channel, Chat
 
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-SESSION = os.path.expanduser("~/.telegram_session")
+SESSION = os.getenv("SESSION", os.path.expanduser("~/.telegram_session"))
 
 client = TelegramClient(SESSION, API_ID, API_HASH)
 
