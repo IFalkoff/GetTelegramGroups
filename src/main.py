@@ -28,9 +28,14 @@ async def main():
         async for dialog in client.iter_dialogs():
             entity = dialog.entity
 
-            # Группы (обычные чаты) и каналы/супергруппы
-            if isinstance(entity, (Chat, Channel)):
-                groups.append({"id": entity.id, "name": dialog.name})
+            # Группы (обычные чаты) и каналы/супергруппы.
+            # Telegram Bot API использует отрицательные ID:
+            #   Chat    → -<id>
+            #   Channel → -100<id>
+            if isinstance(entity, Chat):
+                groups.append({"id": -entity.id, "name": dialog.name})
+            elif isinstance(entity, Channel):
+                groups.append({"id": int(f"-100{entity.id}"), "name": dialog.name})
 
             # Личные диалоги с реальными пользователями (не боты)
             elif isinstance(entity, User) and not entity.bot:
