@@ -1,24 +1,56 @@
+import asyncio
+import csv
 import os
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
+from telethon.tl.types import Channel, Chat, User
 
 load_dotenv()
 
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
 SESSION = os.getenv("SESSION", os.path.expanduser("~/.telegram_session"))
 
-client = TelegramClient(SESSION, API_ID, API_HASH)
+# Пути к выходным CSV-файлам
+GROUPS_CSV = "groups.csv"
+CONTACTS_CSV = "contacts.csv"
 
 
 async def main():
-    me = await client.get_me()
-    print(f"Logged in as: {me.username} ({me.phone})")
+    async with TelegramClient(SESSION, API_ID, API_HASH) as client:
+        me = await client.get_me()
+        print(f"Logged in as: {me.username} ({me.phone})")
 
-    async for dialog in client.iter_dialogs():
-        print(dialog.name, "has ID", dialog.id)
+        groups = []    # список групп и каналов, в которых участвует пользователь
+        contacts = []  # список пользователей, с которыми есть личная переписка
+
+        async for dialog in client.iter_dialogs():
+            entity = dialog.entity
+
+            # Группы (обычные чаты) и каналы/супергруппы
+            if isinstance(entity, (Chat, Channel)):
+                groups.append({"id": entity.id, "name": dialog.name})
+
+            # Личные диалоги с реальными пользователями (не боты)
+            elif isinstance(entity, User) and not entity.bot:
+                contacts.append({"id": entity.id, "name": dialog.name})
+
+        # Сохраняем список групп
+        with open(GROUPS_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name"])
+            writer.writeheader()
+            writer.writerows(groups)
+
+        print(f"Saved {len(groups)} groups → {GROUPS_CSV}")
+
+        # Сохраняем список пользователей
+        with open(CONTACTS_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name"])
+            writer.writeheader()
+            writer.writerows(contacts)
+
+        print(f"Saved {len(contacts)} contacts → {CONTACTS_CSV}")
 
 
-with client:
-    client.loop.run_until_complete(main())
+asyncio.run(main())
