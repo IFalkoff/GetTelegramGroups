@@ -297,7 +297,8 @@ def parse_args() -> argparse.Namespace:
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
-    return parser.parse_args()
+    argv = [a.lower() if a.startswith("--") else a for a in sys.argv[1:]]
+    return parser.parse_args(argv)
 
 
 async def main() -> None:
