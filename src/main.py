@@ -83,16 +83,17 @@ async def fetch_all_dialogs(client: TelegramClient) -> tuple[list[dict], list[di
     return groups, contacts
 
 
-async def get_active_groups(client: TelegramClient) -> list[dict]:
-    """Возвращает группы с новыми сообщениями за последние 24 часа.
+async def get_active_groups(client: TelegramClient, period: Period = 1) -> list[dict]:
+    """Возвращает группы с новыми сообщениями за указанный период.
 
     Args:
         client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
 
     Returns:
         Список словарей с полями ``id``, ``name`` и ``last_message``.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=period)
     active = []
     async for dialog in client.iter_dialogs():
         entity = dialog.entity
@@ -190,16 +191,17 @@ async def get_message_archive(
     return messages
 
 
-async def get_active_contacts(client: TelegramClient) -> list[dict]:
-    """Возвращает контакты, от которых были сообщения за последние 24 часа.
+async def get_active_contacts(client: TelegramClient, period: Period = 1) -> list[dict]:
+    """Возвращает контакты, от которых были сообщения за указанный период.
 
     Args:
         client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
 
     Returns:
         Список словарей с полями ``id``, ``name`` и ``last_message``.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=period)
     active = []
     async for dialog in client.iter_dialogs():
         entity = dialog.entity
@@ -252,8 +254,8 @@ async def fetch_active_archives(
     os.makedirs(os.path.join("archives", "groups"), exist_ok=True)
     os.makedirs(os.path.join("archives", "contacts"), exist_ok=True)
 
-    active_groups = await get_active_groups(client) if mode in ("groups", "both") else []
-    active_contacts = await get_active_contacts(client) if mode in ("contacts", "both") else []
+    active_groups = await get_active_groups(client, period=period) if mode in ("groups", "both") else []
+    active_contacts = await get_active_contacts(client, period=period) if mode in ("contacts", "both") else []
 
     log.info("Fetching archives (period=%dd, mode=%s): %d groups, %d contacts",
              period, mode, len(active_groups), len(active_contacts))
@@ -280,6 +282,43 @@ async def fetch_active_archives(
         log.info("  contact [%s] %s: %d messages (%d media) -> %s", c["id"], c["name"], len(messages), media_count, path)
 
     log.info("Saved %d total messages across %d files", total, len(active_groups) + len(active_contacts))
+
+
+async def save_active_lists(
+    client: TelegramClient,
+    period: Period = 1,
+    mode: str = "both",
+) -> None:
+    """Сохраняет CSV-списки активных групп и/или контактов за указанный период.
+
+    Имена файлов содержат дату и период, например:
+    ``active_groups_2026-05-22_7d.csv``.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
+        mode: Что выгружать — ``"groups"``, ``"contacts"`` или ``"both"``.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    suffix = f"{today}_{period}d"
+
+    if mode in ("groups", "both"):
+        groups = await get_active_groups(client, period=period)
+        path = f"active_groups_{suffix}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name", "last_message"])
+            writer.writeheader()
+            writer.writerows(groups)
+        log.info("Saved %d active groups -> %s", len(groups), path)
+
+    if mode in ("contacts", "both"):
+        contacts = await get_active_contacts(client, period=period)
+        path = f"active_contacts_{suffix}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name", "last_message"])
+            writer.writeheader()
+            writer.writerows(contacts)
+        log.info("Saved %d active contacts -> %s", len(contacts), path)
 
 
 def _read_ids_file(path: str) -> list[int]:
@@ -329,6 +368,11 @@ def parse_args() -> argparse.Namespace:
         help="What to export: groups, contacts, or both (default: both).",
     )
     parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Save active groups/contacts to dated CSV files (respects --period and --mode).",
+    )
+    parser.add_argument(
         "--id",
         type=int,
         metavar="CHAT_ID",
@@ -359,6 +403,10 @@ async def main() -> None:
     async with TelegramClient(SESSION, API_ID, API_HASH) as client:
         me = await client.get_me()
         log.info("Logged in as: %s (%s)", me.username, me.phone)
+
+        if args.list:
+            await save_active_lists(client, period=args.period, mode=args.mode)
+            return
 
         ids: list[int] = []
         if args.id is not None:
