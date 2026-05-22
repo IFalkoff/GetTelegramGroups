@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import csv
 import json
@@ -203,27 +204,34 @@ def _archive_path(category: str, name: str) -> str:
     return os.path.join("archives", category, f"{safe_name}.json")
 
 
-async def fetch_active_archives(client: TelegramClient) -> None:
-    """Собирает архивы сообщений за последние 24 часа по всем активным контактам и группам.
+async def fetch_active_archives(
+    client: TelegramClient,
+    period: Period = 1,
+    mode: str = "both",
+) -> None:
+    """Собирает архивы сообщений по активным группам и/или контактам за указанный период.
 
     Для каждой сущности создаётся отдельный JSON-файл в каталоге ``archives/groups/``
     или ``archives/contacts/``. Имя файла совпадает с именем группы/контакта,
-    пробелы заменяются на ``_``.
+    пробелы и недопустимые символы заменяются на ``_``.
 
     Args:
         client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях. Допустимые значения: 1, 3, 5, 30.
+        mode: Режим выгрузки — ``"groups"``, ``"contacts"`` или ``"both"``.
     """
     os.makedirs(os.path.join("archives", "groups"), exist_ok=True)
     os.makedirs(os.path.join("archives", "contacts"), exist_ok=True)
 
-    active_groups = await get_active_groups(client)
-    active_contacts = await get_active_contacts(client)
+    active_groups = await get_active_groups(client) if mode in ("groups", "both") else []
+    active_contacts = await get_active_contacts(client) if mode in ("contacts", "both") else []
 
-    print(f"Fetching archives: {len(active_groups)} groups, {len(active_contacts)} contacts...")
+    print(f"Fetching archives (period={period}d, mode={mode}): "
+          f"{len(active_groups)} groups, {len(active_contacts)} contacts...")
 
     total = 0
     for g in active_groups:
-        messages = await get_message_archive(client, g["id"], period=1)
+        messages = await get_message_archive(client, g["id"], period=period)
         path = _archive_path("groups", g["name"])
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": g["id"], "name": g["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
@@ -231,7 +239,7 @@ async def fetch_active_archives(client: TelegramClient) -> None:
         print(f"  group   [{g['id']}] {g['name']}: {len(messages)} messages -> {path}")
 
     for c in active_contacts:
-        messages = await get_message_archive(client, c["id"], period=1)
+        messages = await get_message_archive(client, c["id"], period=period)
         path = _archive_path("contacts", c["name"])
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": c["id"], "name": c["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
@@ -241,7 +249,32 @@ async def fetch_active_archives(client: TelegramClient) -> None:
     print(f"Saved {total} total messages across {len(active_groups) + len(active_contacts)} files")
 
 
-async def main():
+def parse_args() -> argparse.Namespace:
+    """Разбирает аргументы командной строки.
+
+    Returns:
+        Namespace с полями ``period`` и ``mode``.
+    """
+    parser = argparse.ArgumentParser(description="Export Telegram message archives.")
+    parser.add_argument(
+        "--period",
+        type=int,
+        choices=[1, 3, 5, 30],
+        default=1,
+        help="Number of days to look back (default: 1).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["groups", "contacts", "both"],
+        default="both",
+        help="What to export: groups, contacts, or both (default: both).",
+    )
+    return parser.parse_args()
+
+
+async def main() -> None:
+    args = parse_args()
+
     async with TelegramClient(SESSION, API_ID, API_HASH) as client:
         me = await client.get_me()
         print(f"Logged in as: {me.username} ({me.phone})")
@@ -263,7 +296,8 @@ async def main():
                 writer.writerows(contacts)
             print(f"Saved {len(contacts)} contacts -> {CONTACTS_CSV}")
 
-        await fetch_active_archives(client)
+        await fetch_active_archives(client, period=args.period, mode=args.mode)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
