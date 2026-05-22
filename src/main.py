@@ -262,6 +262,9 @@ async def get_new_contacts(client: TelegramClient, period: Period = 1) -> list[d
         entity = dialog.entity
         if not isinstance(entity, User) or entity.bot:
             continue
+        # Если последнее сообщение старше cutoff — первое точно тоже; пропускаем
+        if not dialog.date or dialog.date < cutoff:
+            continue
         async for msg in client.iter_messages(entity.id, reverse=True, limit=1):
             if msg.date >= cutoff:
                 new.append({"id": entity.id, "name": dialog.name, "first_message": msg.date.isoformat()})
