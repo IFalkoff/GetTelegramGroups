@@ -186,6 +186,61 @@ async def get_active_contacts(client: TelegramClient) -> list[dict]:
     return active
 
 
+def _archive_path(category: str, name: str) -> str:
+    """Формирует путь к файлу архива.
+
+    Args:
+        category: Подкаталог — ``"groups"`` или ``"contacts"``.
+        name: Отображаемое имя сущности; пробелы заменяются на ``_``.
+
+    Returns:
+        Путь вида ``archives/groups/<name>.json``.
+    """
+    safe_name = name.replace(" ", "_")
+    # Символы, недопустимые в именах файлов Windows: \ / : * ? " < > |
+    for char in r'\/:*?"<>|':
+        safe_name = safe_name.replace(char, "_")
+    return os.path.join("archives", category, f"{safe_name}.json")
+
+
+async def fetch_active_archives(client: TelegramClient) -> None:
+    """Собирает архивы сообщений за последние 24 часа по всем активным контактам и группам.
+
+    Для каждой сущности создаётся отдельный JSON-файл в каталоге ``archives/groups/``
+    или ``archives/contacts/``. Имя файла совпадает с именем группы/контакта,
+    пробелы заменяются на ``_``.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+    """
+    os.makedirs(os.path.join("archives", "groups"), exist_ok=True)
+    os.makedirs(os.path.join("archives", "contacts"), exist_ok=True)
+
+    active_groups = await get_active_groups(client)
+    active_contacts = await get_active_contacts(client)
+
+    print(f"Fetching archives: {len(active_groups)} groups, {len(active_contacts)} contacts...")
+
+    total = 0
+    for g in active_groups:
+        messages = await get_message_archive(client, g["id"], period=1)
+        path = _archive_path("groups", g["name"])
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": g["id"], "name": g["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
+        total += len(messages)
+        print(f"  group   [{g['id']}] {g['name']}: {len(messages)} messages -> {path}")
+
+    for c in active_contacts:
+        messages = await get_message_archive(client, c["id"], period=1)
+        path = _archive_path("contacts", c["name"])
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"id": c["id"], "name": c["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
+        total += len(messages)
+        print(f"  contact [{c['id']}] {c['name']}: {len(messages)} messages -> {path}")
+
+    print(f"Saved {total} total messages across {len(active_groups) + len(active_contacts)} files")
+
+
 async def main():
     async with TelegramClient(SESSION, API_ID, API_HASH) as client:
         me = await client.get_me()
@@ -208,11 +263,7 @@ async def main():
                 writer.writerows(contacts)
             print(f"Saved {len(contacts)} contacts -> {CONTACTS_CSV}")
 
-        archive = await get_message_archive(client, 200521298, period=5)
-        archive_path = "archive_124435179.json"
-        with open(archive_path, "w", encoding="utf-8") as f:
-            json.dump(archive, f, ensure_ascii=False, indent=2)
-        print(f"Archive for 124435179: {len(archive)} messages -> {archive_path}")
+        await fetch_active_archives(client)
 
 
 asyncio.run(main())
