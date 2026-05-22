@@ -141,9 +141,9 @@ class TestMessageType:
 class TestParseArgs:
     def test_defaults(self):
         with patch("sys.argv", ["main.py"]):
-            args = parse_args()
-        assert args.period == 1
-        assert args.mode == "both"
+            with pytest.raises(SystemExit) as exc:
+                parse_args()
+        assert exc.value.code == 0
 
     def test_period(self):
         with patch("sys.argv", ["main.py", "--period", "5"]):
@@ -161,7 +161,7 @@ class TestParseArgs:
         assert args.mode == "contacts"
 
     def test_invalid_period_exits(self):
-        with patch("sys.argv", ["main.py", "--period", "7"]):
+        with patch("sys.argv", ["main.py", "--period", "99"]):
             with pytest.raises(SystemExit):
                 parse_args()
 
