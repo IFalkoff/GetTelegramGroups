@@ -113,6 +113,10 @@ async def get_active_groups(client: TelegramClient) -> list[dict]:
     return active
 
 
+def _is_downloadable(msg) -> bool:
+    return bool(msg.photo or (msg.document and not msg.sticker))
+
+
 def _message_type(msg) -> str:
     """Определяет тип сообщения по вложению.
 
@@ -140,32 +144,39 @@ async def get_message_archive(
     client: TelegramClient,
     entity_id: int,
     period: Period = 1,
+    media_dir: str | None = None,
 ) -> list[dict]:
     """Возвращает архив сообщений для группы или контакта за указанный период.
 
     Сообщения запрашиваются от новых к старым и собираются до тех пор, пока
-    дата сообщения не окажется раньше отсечки. Требует, чтобы сущность была
-    предварительно закеширована Telethon (например, после вызова
-    ``fetch_all_dialogs``).
+    дата сообщения не окажется раньше отсечки. Если передан ``media_dir``,
+    скачивает фото, голосовые и файлы в указанную папку.
 
     Args:
         client: Авторизованный экземпляр TelegramClient.
         entity_id: ID группы (отрицательный) или контакта (положительный).
-        period: Глубина выборки в днях. Допустимые значения: 1, 3, 5, 30.
+        period: Глубина выборки в днях.
+        media_dir: Папка для сохранения медиафайлов; ``None`` — не скачивать.
 
     Returns:
-        Список словарей с полями:
-            - ``id`` — идентификатор сообщения;
-            - ``date`` — дата в формате ISO 8601;
-            - ``from_id`` — ID отправителя;
-            - ``text`` — текст сообщения;
-            - ``type`` — тип вложения или ``"text"``.
+        Список словарей с полями ``id``, ``date``, ``from_id``, ``text``,
+        ``type`` и ``media_path`` (имя файла или ``None``).
     """
+    if media_dir:
+        os.makedirs(media_dir, exist_ok=True)
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=period)
     messages = []
     async for msg in client.iter_messages(entity_id):
         if msg.date < cutoff:
             break
+
+        media_path = None
+        if media_dir and _is_downloadable(msg):
+            downloaded = await client.download_media(msg, file=media_dir)
+            if downloaded:
+                media_path = os.path.basename(downloaded)
+
         messages.append(
             {
                 "id": msg.id,
@@ -173,6 +184,7 @@ async def get_message_archive(
                 "from_id": msg.sender_id,
                 "text": msg.text or "",
                 "type": _message_type(msg),
+                "media_path": media_path,
             }
         )
     return messages
@@ -205,21 +217,20 @@ async def get_active_contacts(client: TelegramClient) -> list[dict]:
     return active
 
 
-def _archive_path(category: str, name: str) -> str:
-    """Формирует путь к файлу архива.
-
-    Args:
-        category: Подкаталог — ``"groups"`` или ``"contacts"``.
-        name: Отображаемое имя сущности; пробелы заменяются на ``_``.
-
-    Returns:
-        Путь вида ``archives/groups/<name>.json``.
-    """
-    safe_name = name.replace(" ", "_")
+def _safe_name(name: str) -> str:
+    safe = name.replace(" ", "_")
     # Символы, недопустимые в именах файлов Windows: \ / : * ? " < > |
     for char in r'\/:*?"<>|':
-        safe_name = safe_name.replace(char, "_")
-    return os.path.join("archives", category, f"{safe_name}.json")
+        safe = safe.replace(char, "_")
+    return safe
+
+
+def _archive_path(category: str, name: str) -> str:
+    return os.path.join("archives", category, f"{_safe_name(name)}.json")
+
+
+def _media_dir(category: str, name: str) -> str:
+    return os.path.join("archives", category, _safe_name(name))
 
 
 async def fetch_active_archives(
@@ -249,20 +260,24 @@ async def fetch_active_archives(
 
     total = 0
     for g in active_groups:
-        messages = await get_message_archive(client, g["id"], period=period)
+        media = _media_dir("groups", g["name"])
+        messages = await get_message_archive(client, g["id"], period=period, media_dir=media)
         path = _archive_path("groups", g["name"])
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": g["id"], "name": g["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
         total += len(messages)
-        log.info("  group   [%s] %s: %d messages -> %s", g["id"], g["name"], len(messages), path)
+        media_count = sum(1 for m in messages if m["media_path"])
+        log.info("  group   [%s] %s: %d messages (%d media) -> %s", g["id"], g["name"], len(messages), media_count, path)
 
     for c in active_contacts:
-        messages = await get_message_archive(client, c["id"], period=period)
+        media = _media_dir("contacts", c["name"])
+        messages = await get_message_archive(client, c["id"], period=period, media_dir=media)
         path = _archive_path("contacts", c["name"])
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": c["id"], "name": c["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
         total += len(messages)
-        log.info("  contact [%s] %s: %d messages -> %s", c["id"], c["name"], len(messages), path)
+        media_count = sum(1 for m in messages if m["media_path"])
+        log.info("  contact [%s] %s: %d messages (%d media) -> %s", c["id"], c["name"], len(messages), media_count, path)
 
     log.info("Saved %d total messages across %d files", total, len(active_groups) + len(active_contacts))
 
@@ -309,12 +324,14 @@ async def main() -> None:
         log.info("Logged in as: %s (%s)", me.username, me.phone)
 
         if args.id is not None:
-            os.makedirs(os.path.join("archives"), exist_ok=True)
-            messages = await get_message_archive(client, args.id, period=args.period)
+            os.makedirs("archives", exist_ok=True)
+            media = os.path.join("archives", str(args.id))
+            messages = await get_message_archive(client, args.id, period=args.period, media_dir=media)
             path = os.path.join("archives", f"{args.id}.json")
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"id": args.id, "messages": messages}, f, ensure_ascii=False, indent=2)
-            log.info("Saved %d messages -> %s", len(messages), path)
+            media_count = sum(1 for m in messages if m["media_path"])
+            log.info("Saved %d messages (%d media) -> %s", len(messages), media_count, path)
             return
 
         if is_fresh(GROUPS_CSV) and is_fresh(CONTACTS_CSV):

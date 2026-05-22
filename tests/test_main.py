@@ -320,7 +320,7 @@ class TestGetMessageArchive:
         recent = datetime.now(timezone.utc) - timedelta(minutes=30)
         msgs = [_make_msg(7, recent, 42, text="hi")]
         result = asyncio.run(get_message_archive(self._make_client(msgs), 1, period=1))
-        assert set(result[0].keys()) == {"id", "date", "from_id", "text", "type"}
+        assert set(result[0].keys()) == {"id", "date", "from_id", "text", "type", "media_path"}
 
     def test_period_30_days(self):
         date_25d = datetime.now(timezone.utc) - timedelta(days=25)
