@@ -295,7 +295,11 @@ def _read_ids_file(path: str) -> list[int]:
 async def _archive_by_id(client: TelegramClient, entity_id: int, period: Period) -> None:
     os.makedirs("archives", exist_ok=True)
     media = os.path.join("archives", str(entity_id))
-    messages = await get_message_archive(client, entity_id, period=period, media_dir=media)
+    try:
+        messages = await get_message_archive(client, entity_id, period=period, media_dir=media)
+    except Exception as e:
+        log.warning("Skipping ID %s: %s", entity_id, e)
+        return
     path = os.path.join("archives", f"{entity_id}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"id": entity_id, "messages": messages}, f, ensure_ascii=False, indent=2)
