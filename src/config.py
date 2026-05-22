@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-Period = Literal[1, 3, 5, 30]
+Period = Literal[1, 2, 3, 4, 5, 6, 7, 10, 14, 21, 30]
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
