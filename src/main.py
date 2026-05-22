@@ -219,6 +219,55 @@ async def get_active_contacts(client: TelegramClient, period: Period = 1) -> lis
     return active
 
 
+async def get_new_groups(client: TelegramClient, period: Period = 1) -> list[dict]:
+    """Возвращает группы, созданные за указанный период.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
+
+    Returns:
+        Список словарей с полями ``id``, ``name`` и ``created``.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=period)
+    new = []
+    async for dialog in client.iter_dialogs():
+        entity = dialog.entity
+        if not isinstance(entity, (Chat, Channel)):
+            continue
+        if entity.date and entity.date >= cutoff:
+            if isinstance(entity, Chat):
+                group_id = -entity.id
+            else:
+                group_id = int(f"-100{entity.id}")
+            new.append({"id": group_id, "name": dialog.name, "created": entity.date.isoformat()})
+    return new
+
+
+async def get_new_contacts(client: TelegramClient, period: Period = 1) -> list[dict]:
+    """Возвращает контакты, переписка с которыми началась за указанный период.
+
+    Определяется по дате самого первого сообщения в диалоге.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
+
+    Returns:
+        Список словарей с полями ``id``, ``name`` и ``first_message``.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=period)
+    new = []
+    async for dialog in client.iter_dialogs():
+        entity = dialog.entity
+        if not isinstance(entity, User) or entity.bot:
+            continue
+        async for msg in client.iter_messages(entity.id, reverse=True, limit=1):
+            if msg.date >= cutoff:
+                new.append({"id": entity.id, "name": dialog.name, "first_message": msg.date.isoformat()})
+    return new
+
+
 def _safe_name(name: str) -> str:
     safe = name.replace(" ", "_")
     # Символы, недопустимые в именах файлов Windows: \ / : * ? " < > |
@@ -321,6 +370,43 @@ async def save_active_lists(
         log.info("Saved %d active contacts -> %s", len(contacts), path)
 
 
+async def save_new_lists(
+    client: TelegramClient,
+    period: Period = 1,
+    mode: str = "both",
+) -> None:
+    """Сохраняет CSV-списки новых групп и/или контактов за указанный период.
+
+    Имена файлов содержат дату и период, например:
+    ``new_groups_2026-05-22_7d.csv``.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        period: Глубина выборки в днях.
+        mode: Что выгружать — ``"groups"``, ``"contacts"`` или ``"both"``.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    suffix = f"{today}_{period}d"
+
+    if mode in ("groups", "both"):
+        groups = await get_new_groups(client, period=period)
+        path = f"new_groups_{suffix}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name", "created"])
+            writer.writeheader()
+            writer.writerows(groups)
+        log.info("Saved %d new groups -> %s", len(groups), path)
+
+    if mode in ("contacts", "both"):
+        contacts = await get_new_contacts(client, period=period)
+        path = f"new_contacts_{suffix}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name", "first_message"])
+            writer.writeheader()
+            writer.writerows(contacts)
+        log.info("Saved %d new contacts -> %s", len(contacts), path)
+
+
 def _read_ids_file(path: str) -> list[int]:
     ids = []
     with open(path, encoding="utf-8") as f:
@@ -373,6 +459,11 @@ def parse_args() -> argparse.Namespace:
         help="Save active groups/contacts to dated CSV files (respects --period and --mode).",
     )
     parser.add_argument(
+        "--new",
+        action="store_true",
+        help="Save newly created groups/contacts to dated CSV files (respects --period and --mode).",
+    )
+    parser.add_argument(
         "--id",
         type=int,
         metavar="CHAT_ID",
@@ -406,6 +497,10 @@ async def main() -> None:
 
         if args.list:
             await save_active_lists(client, period=args.period, mode=args.mode)
+            return
+
+        if args.new:
+            await save_new_lists(client, period=args.period, mode=args.mode)
             return
 
         ids: list[int] = []
