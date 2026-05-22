@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import csv
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,13 @@ from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat, User
 
 Period = Literal[1, 3, 5, 30]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -227,8 +235,8 @@ async def fetch_active_archives(
     active_groups = await get_active_groups(client) if mode in ("groups", "both") else []
     active_contacts = await get_active_contacts(client) if mode in ("contacts", "both") else []
 
-    print(f"Fetching archives (period={period}d, mode={mode}): "
-          f"{len(active_groups)} groups, {len(active_contacts)} contacts...")
+    log.info("Fetching archives (period=%dd, mode=%s): %d groups, %d contacts",
+             period, mode, len(active_groups), len(active_contacts))
 
     total = 0
     for g in active_groups:
@@ -237,7 +245,7 @@ async def fetch_active_archives(
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": g["id"], "name": g["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
         total += len(messages)
-        print(f"  group   [{g['id']}] {g['name']}: {len(messages)} messages -> {path}")
+        log.info("  group   [%s] %s: %d messages -> %s", g["id"], g["name"], len(messages), path)
 
     for c in active_contacts:
         messages = await get_message_archive(client, c["id"], period=period)
@@ -245,9 +253,9 @@ async def fetch_active_archives(
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"id": c["id"], "name": c["name"], "messages": messages}, f, ensure_ascii=False, indent=2)
         total += len(messages)
-        print(f"  contact [{c['id']}] {c['name']}: {len(messages)} messages -> {path}")
+        log.info("  contact [%s] %s: %d messages -> %s", c["id"], c["name"], len(messages), path)
 
-    print(f"Saved {total} total messages across {len(active_groups) + len(active_contacts)} files")
+    log.info("Saved %d total messages across %d files", total, len(active_groups) + len(active_contacts))
 
 
 def parse_args() -> argparse.Namespace:
@@ -289,7 +297,7 @@ async def main() -> None:
 
     async with TelegramClient(SESSION, API_ID, API_HASH) as client:
         me = await client.get_me()
-        print(f"Logged in as: {me.username} ({me.phone})")
+        log.info("Logged in as: %s (%s)", me.username, me.phone)
 
         if args.id is not None:
             os.makedirs(os.path.join("archives"), exist_ok=True)
@@ -297,11 +305,11 @@ async def main() -> None:
             path = os.path.join("archives", f"{args.id}.json")
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"id": args.id, "messages": messages}, f, ensure_ascii=False, indent=2)
-            print(f"Saved {len(messages)} messages -> {path}")
+            log.info("Saved %d messages -> %s", len(messages), path)
             return
 
         if is_fresh(GROUPS_CSV) and is_fresh(CONTACTS_CSV):
-            print("groups.csv and contacts.csv are up to date, skipping fetch.")
+            log.info("groups.csv and contacts.csv are up to date, skipping fetch.")
         else:
             groups, contacts = await fetch_all_dialogs(client)
 
@@ -309,13 +317,13 @@ async def main() -> None:
                 writer = csv.DictWriter(f, fieldnames=["id", "name"])
                 writer.writeheader()
                 writer.writerows(groups)
-            print(f"Saved {len(groups)} groups -> {GROUPS_CSV}")
+            log.info("Saved %d groups -> %s", len(groups), GROUPS_CSV)
 
             with open(CONTACTS_CSV, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=["id", "name"])
                 writer.writeheader()
                 writer.writerows(contacts)
-            print(f"Saved {len(contacts)} contacts -> {CONTACTS_CSV}")
+            log.info("Saved %d contacts -> %s", len(contacts), CONTACTS_CSV)
 
         await fetch_active_archives(client, period=args.period, mode=args.mode)
 
