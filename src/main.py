@@ -266,10 +266,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
+        type=str.lower,
         choices=["groups", "contacts", "both"],
         default="both",
         help="What to export: groups, contacts, or both (default: both).",
     )
+    parser.add_argument(
+        "--id",
+        type=int,
+        metavar="CHAT_ID",
+        help="Fetch archive for a specific chat/contact by ID (skips all other steps).",
+    )
+    sys.argv = [a.lower() if a.startswith("--") else a for a in sys.argv]
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
@@ -282,6 +290,15 @@ async def main() -> None:
     async with TelegramClient(SESSION, API_ID, API_HASH) as client:
         me = await client.get_me()
         print(f"Logged in as: {me.username} ({me.phone})")
+
+        if args.id is not None:
+            os.makedirs(os.path.join("archives"), exist_ok=True)
+            messages = await get_message_archive(client, args.id, period=args.period)
+            path = os.path.join("archives", f"{args.id}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"id": args.id, "messages": messages}, f, ensure_ascii=False, indent=2)
+            print(f"Saved {len(messages)} messages -> {path}")
+            return
 
         if is_fresh(GROUPS_CSV) and is_fresh(CONTACTS_CSV):
             print("groups.csv and contacts.csv are up to date, skipping fetch.")
