@@ -13,12 +13,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from main import (
     _archive_path,
     _message_type,
+    _read_ids_file,
     fetch_all_dialogs,
     get_active_contacts,
     get_active_groups,
     get_message_archive,
+    get_new_contacts,
+    get_new_groups,
     is_fresh,
     parse_args,
+    save_active_lists,
+    save_new_lists,
 )
 
 
@@ -327,3 +332,232 @@ class TestGetMessageArchive:
         msgs = [_make_msg(1, date_25d, 10, text="old but within 30d")]
         result = asyncio.run(get_message_archive(self._make_client(msgs), 1, period=30))
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_new_groups
+# ---------------------------------------------------------------------------
+
+class TestGetNewGroups:
+    def _make_client(self, dialogs):
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter(dialogs)
+        return client
+
+    def test_recently_created_group_included(self):
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel)
+        ch.id = 10
+        ch.date = datetime.now(timezone.utc) - timedelta(hours=2)
+        client = self._make_client([_make_dialog(ch, "NewGroup", ch.date)])
+        result = asyncio.run(get_new_groups(client, period=1))
+        assert len(result) == 1
+        assert result[0]["name"] == "NewGroup"
+        assert "created" in result[0]
+
+    def test_old_group_excluded(self):
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel)
+        ch.id = 10
+        ch.date = datetime.now(timezone.utc) - timedelta(days=10)
+        client = self._make_client([_make_dialog(ch, "OldGroup", ch.date)])
+        result = asyncio.run(get_new_groups(client, period=1))
+        assert result == []
+
+    def test_chat_type_included(self):
+        from telethon.tl.types import Chat
+
+        chat = MagicMock(spec=Chat)
+        chat.id = 20
+        chat.date = datetime.now(timezone.utc) - timedelta(hours=1)
+        client = self._make_client([_make_dialog(chat, "NewChat", chat.date)])
+        result = asyncio.run(get_new_groups(client, period=1))
+        assert len(result) == 1
+        assert result[0]["id"] == -20
+
+    def test_channel_id_formatted_correctly(self):
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel)
+        ch.id = 999
+        ch.date = datetime.now(timezone.utc) - timedelta(hours=1)
+        client = self._make_client([_make_dialog(ch, "Ch", ch.date)])
+        result = asyncio.run(get_new_groups(client, period=1))
+        assert result[0]["id"] == int("-100999")
+
+    def test_period_respected(self):
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel)
+        ch.id = 1
+        ch.date = datetime.now(timezone.utc) - timedelta(days=3)
+        client = self._make_client([_make_dialog(ch, "Group", ch.date)])
+        assert asyncio.run(get_new_groups(client, period=2)) == []
+        client.iter_dialogs.return_value = _aiter([_make_dialog(ch, "Group", ch.date)])
+        assert len(asyncio.run(get_new_groups(client, period=5))) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_new_contacts
+# ---------------------------------------------------------------------------
+
+class TestGetNewContacts:
+    def _make_client(self, dialogs, first_msg=None):
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter(dialogs)
+        client.iter_messages.return_value = _aiter([first_msg] if first_msg else [])
+        return client
+
+    def test_new_contact_included(self):
+        from telethon.tl.types import User
+
+        u = MagicMock(spec=User); u.bot = False; u.id = 55
+        first = _make_msg(1, datetime.now(timezone.utc) - timedelta(hours=2), 55)
+        client = self._make_client([_make_dialog(u, "Alice", first.date)], first_msg=first)
+        result = asyncio.run(get_new_contacts(client, period=1))
+        assert len(result) == 1
+        assert result[0]["id"] == 55
+        assert "first_message" in result[0]
+
+    def test_old_contact_excluded(self):
+        from telethon.tl.types import User
+
+        u = MagicMock(spec=User); u.bot = False; u.id = 55
+        first = _make_msg(1, datetime.now(timezone.utc) - timedelta(days=10), 55)
+        client = self._make_client([_make_dialog(u, "Bob", first.date)], first_msg=first)
+        result = asyncio.run(get_new_contacts(client, period=1))
+        assert result == []
+
+    def test_bot_excluded(self):
+        from telethon.tl.types import User
+
+        bot = MagicMock(spec=User); bot.bot = True; bot.id = 77
+        client = self._make_client([_make_dialog(bot, "Bot", datetime.now(timezone.utc))])
+        result = asyncio.run(get_new_contacts(client, period=1))
+        assert result == []
+
+    def test_no_messages_excluded(self):
+        from telethon.tl.types import User
+
+        u = MagicMock(spec=User); u.bot = False; u.id = 88
+        client = self._make_client([_make_dialog(u, "Ghost", datetime.now(timezone.utc))])
+        result = asyncio.run(get_new_contacts(client, period=1))
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _read_ids_file
+# ---------------------------------------------------------------------------
+
+class TestReadIdsFile:
+    def test_reads_ids(self, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("123\n-456\n789\n")
+        assert _read_ids_file(str(f)) == [123, -456, 789]
+
+    def test_ignores_comments(self, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("# group\n-100123\n")
+        assert _read_ids_file(str(f)) == [-100123]
+
+    def test_ignores_empty_lines(self, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("\n111\n\n222\n")
+        assert _read_ids_file(str(f)) == [111, 222]
+
+    def test_strips_inline_comments(self, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("999  # this is a contact\n")
+        assert _read_ids_file(str(f)) == [999]
+
+
+# ---------------------------------------------------------------------------
+# save_active_lists
+# ---------------------------------------------------------------------------
+
+class TestSaveActiveLists:
+    def _make_client(self, groups=None, contacts=None):
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        return client
+
+    def test_creates_groups_csv(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel); ch.id = 1
+        recent = datetime.now(timezone.utc) - timedelta(hours=1)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([_make_dialog(ch, "G", recent)])
+        asyncio.run(save_active_lists(client, period=1, mode="groups"))
+        files = list(tmp_path.glob("active_groups_*.csv"))
+        assert len(files) == 1
+
+    def test_creates_contacts_csv(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from telethon.tl.types import User
+
+        u = MagicMock(spec=User); u.bot = False; u.id = 2
+        recent = datetime.now(timezone.utc) - timedelta(hours=1)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([_make_dialog(u, "C", recent)])
+        asyncio.run(save_active_lists(client, period=1, mode="contacts"))
+        files = list(tmp_path.glob("active_contacts_*.csv"))
+        assert len(files) == 1
+
+    def test_filename_contains_date_and_period(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_active_lists(client, period=7, mode="groups"))
+        files = list(tmp_path.glob("active_groups_*_7d.csv"))
+        assert len(files) == 1
+
+    def test_mode_both_creates_two_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_active_lists(client, period=1, mode="both"))
+        assert len(list(tmp_path.glob("active_groups_*.csv"))) == 1
+        assert len(list(tmp_path.glob("active_contacts_*.csv"))) == 1
+
+
+# ---------------------------------------------------------------------------
+# save_new_lists
+# ---------------------------------------------------------------------------
+
+class TestSaveNewLists:
+    def test_creates_new_groups_csv(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_new_lists(client, period=3, mode="groups"))
+        files = list(tmp_path.glob("new_groups_*_3d.csv"))
+        assert len(files) == 1
+
+    def test_creates_new_contacts_csv(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_new_lists(client, period=5, mode="contacts"))
+        files = list(tmp_path.glob("new_contacts_*_5d.csv"))
+        assert len(files) == 1
+
+    def test_filename_contains_date_and_period(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        today = datetime.now().strftime("%Y-%m-%d")
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_new_lists(client, period=14, mode="groups"))
+        files = list(tmp_path.glob(f"new_groups_{today}_14d.csv"))
+        assert len(files) == 1
+
+    def test_mode_both_creates_two_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_new_lists(client, period=1, mode="both"))
+        assert len(list(tmp_path.glob("new_groups_*.csv"))) == 1
+        assert len(list(tmp_path.glob("new_contacts_*.csv"))) == 1
