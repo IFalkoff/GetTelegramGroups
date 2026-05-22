@@ -3,6 +3,7 @@ import asyncio
 import csv
 import json
 import logging
+import logging.handlers
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -19,12 +20,25 @@ from config import (
     Period,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger(__name__)
+def _setup_logging() -> logging.Logger:
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    os.makedirs("logs", exist_ok=True)
+    rotated = logging.handlers.RotatingFileHandler(
+        "logs/app.log", maxBytes=1 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    rotated.setFormatter(fmt)
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(console)
+    logger.addHandler(rotated)
+    return logger
+
+log = _setup_logging()
 
 
 def is_fresh(path: str) -> bool:

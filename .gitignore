@@ -19,3 +19,4 @@ __pycache__/
 # Output data
 *.csv
 archives/
+logs/
