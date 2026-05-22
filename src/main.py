@@ -279,7 +279,6 @@ def parse_args() -> argparse.Namespace:
         metavar="CHAT_ID",
         help="Fetch archive for a specific chat/contact by ID (skips all other steps).",
     )
-    sys.argv = [a.lower() if a.startswith("--") else a for a in sys.argv]
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
