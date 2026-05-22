@@ -3,6 +3,7 @@ import asyncio
 import csv
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -269,6 +270,9 @@ def parse_args() -> argparse.Namespace:
         default="both",
         help="What to export: groups, contacts, or both (default: both).",
     )
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
     return parser.parse_args()
 
 
