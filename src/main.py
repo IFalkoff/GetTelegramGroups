@@ -282,6 +282,27 @@ async def fetch_active_archives(
     log.info("Saved %d total messages across %d files", total, len(active_groups) + len(active_contacts))
 
 
+def _read_ids_file(path: str) -> list[int]:
+    ids = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            if line:
+                ids.append(int(line))
+    return ids
+
+
+async def _archive_by_id(client: TelegramClient, entity_id: int, period: Period) -> None:
+    os.makedirs("archives", exist_ok=True)
+    media = os.path.join("archives", str(entity_id))
+    messages = await get_message_archive(client, entity_id, period=period, media_dir=media)
+    path = os.path.join("archives", f"{entity_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"id": entity_id, "messages": messages}, f, ensure_ascii=False, indent=2)
+    media_count = sum(1 for m in messages if m["media_path"])
+    log.info("Saved %d messages (%d media) -> %s", len(messages), media_count, path)
+
+
 def parse_args() -> argparse.Namespace:
     """Разбирает аргументы командной строки.
 
@@ -307,7 +328,19 @@ def parse_args() -> argparse.Namespace:
         "--id",
         type=int,
         metavar="CHAT_ID",
-        help="Fetch archive for a specific chat/contact by ID (skips all other steps).",
+        help="Fetch archive for a single chat/contact by ID.",
+    )
+    parser.add_argument(
+        "--ids",
+        type=int,
+        nargs="+",
+        metavar="CHAT_ID",
+        help="Fetch archives for multiple IDs (space-separated).",
+    )
+    parser.add_argument(
+        "--ids-file",
+        metavar="FILE",
+        help="Path to a file with IDs (one per line; lines starting with # are ignored).",
     )
     if len(sys.argv) == 1:
         parser.print_help()
@@ -323,15 +356,21 @@ async def main() -> None:
         me = await client.get_me()
         log.info("Logged in as: %s (%s)", me.username, me.phone)
 
+        ids: list[int] = []
         if args.id is not None:
-            os.makedirs("archives", exist_ok=True)
-            media = os.path.join("archives", str(args.id))
-            messages = await get_message_archive(client, args.id, period=args.period, media_dir=media)
-            path = os.path.join("archives", f"{args.id}.json")
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"id": args.id, "messages": messages}, f, ensure_ascii=False, indent=2)
-            media_count = sum(1 for m in messages if m["media_path"])
-            log.info("Saved %d messages (%d media) -> %s", len(messages), media_count, path)
+            ids.append(args.id)
+        if args.ids:
+            ids.extend(args.ids)
+        if args.ids_file:
+            ids.extend(_read_ids_file(args.ids_file))
+        # deduplicate preserving order
+        seen: set[int] = set()
+        ids = [x for x in ids if not (x in seen or seen.add(x))]
+
+        if ids:
+            log.info("Fetching archives for %d ID(s): %s", len(ids), ids)
+            for entity_id in ids:
+                await _archive_by_id(client, entity_id, period=args.period)
             return
 
         if is_fresh(GROUPS_CSV) and is_fresh(CONTACTS_CSV):
