@@ -6,13 +6,18 @@ import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Literal
 
-from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat, User
 
-Period = Literal[1, 3, 5, 30]
+from config import (
+    API_HASH,
+    API_ID,
+    CONTACTS_CSV,
+    GROUPS_CSV,
+    SESSION,
+    Period,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,17 +25,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-load_dotenv()
-
-API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"]
-SESSION = os.getenv("SESSION", os.path.expanduser("~/.telegram_session"))
-
-GROUPS_CSV = "groups.csv"
-CONTACTS_CSV = "contacts.csv"
-ACTIVE_GROUPS_CSV = "active_groups.csv"
-ACTIVE_CONTACTS_CSV = "active_contacts.csv"
 
 
 def is_fresh(path: str) -> bool:
