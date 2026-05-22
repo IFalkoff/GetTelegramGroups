@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from typing import get_args
 
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat, User
@@ -276,7 +277,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--period",
         type=int,
-        choices=[1, 3, 5, 30],
+        choices=list(get_args(Period)),
         default=1,
         help="Number of days to look back (default: 1).",
     )
