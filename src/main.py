@@ -1,11 +1,15 @@
 import asyncio
 import csv
+import json
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat, User
+
+Period = Literal[1, 3, 5, 30]
 
 load_dotenv()
 
@@ -80,12 +84,79 @@ async def get_active_groups(client: TelegramClient) -> list[dict]:
                 group_id = -entity.id
             else:
                 group_id = int(f"-100{entity.id}")
-            active.append({
-                "id": group_id,
-                "name": dialog.name,
-                "last_message": dialog.date.isoformat(),
-            })
+            active.append(
+                {
+                    "id": group_id,
+                    "name": dialog.name,
+                    "last_message": dialog.date.isoformat(),
+                }
+            )
     return active
+
+
+def _message_type(msg) -> str:
+    """Определяет тип сообщения по вложению.
+
+    Args:
+        msg: Объект сообщения Telethon.
+
+    Returns:
+        Строка с типом: ``"photo"``, ``"sticker"``, ``"video"``, ``"audio"``,
+        ``"document"`` или ``"text"``.
+    """
+    if msg.photo:
+        return "photo"
+    if msg.sticker:
+        return "sticker"
+    if msg.video:
+        return "video"
+    if msg.audio:
+        return "audio"
+    if msg.document:
+        return "document"
+    return "text"
+
+
+async def get_message_archive(
+    client: TelegramClient,
+    entity_id: int,
+    period: Period = 1,
+) -> list[dict]:
+    """Возвращает архив сообщений для группы или контакта за указанный период.
+
+    Сообщения запрашиваются от новых к старым и собираются до тех пор, пока
+    дата сообщения не окажется раньше отсечки. Требует, чтобы сущность была
+    предварительно закеширована Telethon (например, после вызова
+    ``fetch_all_dialogs``).
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        entity_id: ID группы (отрицательный) или контакта (положительный).
+        period: Глубина выборки в днях. Допустимые значения: 1, 3, 5, 30.
+
+    Returns:
+        Список словарей с полями:
+            - ``id`` — идентификатор сообщения;
+            - ``date`` — дата в формате ISO 8601;
+            - ``from_id`` — ID отправителя;
+            - ``text`` — текст сообщения;
+            - ``type`` — тип вложения или ``"text"``.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=period)
+    messages = []
+    async for msg in client.iter_messages(entity_id):
+        if msg.date < cutoff:
+            break
+        messages.append(
+            {
+                "id": msg.id,
+                "date": msg.date.isoformat(),
+                "from_id": msg.sender_id,
+                "text": msg.text or "",
+                "type": _message_type(msg),
+            }
+        )
+    return messages
 
 
 async def get_active_contacts(client: TelegramClient) -> list[dict]:
@@ -104,11 +175,14 @@ async def get_active_contacts(client: TelegramClient) -> list[dict]:
         if not isinstance(entity, User) or entity.bot:
             continue
         if dialog.date and dialog.date >= cutoff:
-            active.append({
-                "id": entity.id,
-                "name": dialog.name,
-                "last_message": dialog.date.isoformat(),
-            })
+            active.append(
+                {
+                    "id": entity.id,
+                    "name": dialog.name,
+                    "last_message": dialog.date.isoformat(),
+                }
+            )
+
     return active
 
 
@@ -133,6 +207,12 @@ async def main():
                 writer.writeheader()
                 writer.writerows(contacts)
             print(f"Saved {len(contacts)} contacts -> {CONTACTS_CSV}")
+
+        archive = await get_message_archive(client, 200521298, period=5)
+        archive_path = "archive_124435179.json"
+        with open(archive_path, "w", encoding="utf-8") as f:
+            json.dump(archive, f, ensure_ascii=False, indent=2)
+        print(f"Archive for 124435179: {len(archive)} messages -> {archive_path}")
 
 
 asyncio.run(main())
