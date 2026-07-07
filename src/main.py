@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import get_args
 
 from telethon import TelegramClient
-from telethon.tl.types import Channel, Chat, User
+from telethon.tl.functions.messages import GetForumTopicsRequest
+from telethon.tl.types import Channel, Chat, ForumTopic, User
 
 from config import (
     API_HASH,
@@ -271,6 +272,69 @@ async def get_new_contacts(client: TelegramClient, period: Period = 1) -> list[d
     return new
 
 
+async def get_forum_topics(client: TelegramClient, group_id: int) -> list[dict]:
+    """Возвращает список тем форума супергруппы.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        group_id: ID супергруппы (например, -100xxxxxxxxxx).
+
+    Returns:
+        Список словарей с полями ``id``, ``title``, ``created`` и ``closed``.
+    """
+    topics = []
+    peer = await client.get_input_entity(group_id)
+    offset_date: datetime | None = None
+    offset_id, offset_topic = 0, 0
+    limit = 100
+    while True:
+        result = await client(
+            GetForumTopicsRequest(
+                peer=peer,
+                offset_date=offset_date,
+                offset_id=offset_id,
+                offset_topic=offset_topic,
+                limit=limit,
+            )
+        )
+        batch = [t for t in result.topics if isinstance(t, ForumTopic)]
+        for t in batch:
+            topics.append(
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "created": t.date.isoformat() if t.date else None,
+                    "closed": t.closed,
+                }
+            )
+        if len(result.topics) < limit:
+            break
+        last = result.topics[-1]
+        offset_topic = last.id
+        offset_id = last.top_message
+        offset_date = last.date
+    return topics
+
+
+async def save_topics_list(client: TelegramClient, group_id: int) -> None:
+    """Сохраняет CSV-список тем форума супергруппы.
+
+    Имя файла содержит ID группы и дату, например: ``topics_-1001234567890_2026-07-07.csv``.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        group_id: ID супергруппы.
+    """
+    topics = await get_forum_topics(client, group_id)
+    today = datetime.now().strftime("%Y-%m-%d")
+    path = f"topics_{group_id}_{today}.csv"
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["id", "title", "created", "closed"])
+        writer.writeheader()
+        writer.writerows(topics)
+    log.info("Saved %d topics for group %s -> %s", len(topics), group_id, path)
+
+
 def _safe_name(name: str) -> str:
     safe = name.replace(" ", "_")
     # Символы, недопустимые в именах файлов Windows: \ / : * ? " < > |
@@ -484,6 +548,12 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="Path to a file with IDs (one per line; lines starting with # are ignored).",
     )
+    parser.add_argument(
+        "--topics",
+        type=int,
+        metavar="GROUP_ID",
+        help="List forum topics for a supergroup and save them to a dated CSV file.",
+    )
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
@@ -504,6 +574,10 @@ async def main() -> None:
 
         if args.new:
             await save_new_lists(client, period=args.period, mode=args.mode)
+            return
+
+        if args.topics is not None:
+            await save_topics_list(client, args.topics)
             return
 
         ids: list[int] = []

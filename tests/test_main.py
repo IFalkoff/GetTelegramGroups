@@ -17,6 +17,7 @@ from main import (
     fetch_all_dialogs,
     get_active_contacts,
     get_active_groups,
+    get_forum_topics,
     get_message_archive,
     get_new_contacts,
     get_new_groups,
@@ -24,6 +25,7 @@ from main import (
     parse_args,
     save_active_lists,
     save_new_lists,
+    save_topics_list,
 )
 
 
@@ -57,6 +59,18 @@ def _make_msg(msg_id, date, sender_id, text="", photo=None, video=None,
     m.document = document
     m.sticker = sticker
     return m
+
+
+def _make_topic(topic_id, title, date, top_message=None, closed=False):
+    from telethon.tl.types import ForumTopic
+
+    t = MagicMock(spec=ForumTopic)
+    t.id = topic_id
+    t.title = title
+    t.date = date
+    t.closed = closed
+    t.top_message = top_message if top_message is not None else topic_id
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +575,82 @@ class TestSaveNewLists:
         asyncio.run(save_new_lists(client, period=1, mode="both"))
         assert len(list(tmp_path.glob("new_groups_*.csv"))) == 1
         assert len(list(tmp_path.glob("new_contacts_*.csv"))) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_forum_topics
+# ---------------------------------------------------------------------------
+
+class TestGetForumTopics:
+    def _make_client(self):
+        client = AsyncMock()
+        client.get_input_entity.return_value = "peer"
+        return client
+
+    def test_single_page(self):
+        date = datetime.now(timezone.utc)
+        topic = _make_topic(1, "General", date)
+        client = self._make_client()
+        client.return_value = SimpleNamespace(topics=[topic])
+
+        result = asyncio.run(get_forum_topics(client, -100123))
+
+        assert len(result) == 1
+        assert result[0]["id"] == 1
+        assert result[0]["title"] == "General"
+        assert result[0]["closed"] is False
+        assert result[0]["created"] == date.isoformat()
+
+    def test_deleted_topics_skipped(self):
+        from telethon.tl.types import ForumTopicDeleted
+
+        deleted = MagicMock(spec=ForumTopicDeleted)
+        deleted.id = 5
+        topic = _make_topic(1, "Kept", datetime.now(timezone.utc))
+        client = self._make_client()
+        client.return_value = SimpleNamespace(topics=[deleted, topic])
+
+        result = asyncio.run(get_forum_topics(client, -100123))
+
+        assert len(result) == 1
+        assert result[0]["id"] == 1
+
+    def test_pagination_follows_offset(self):
+        date1 = datetime.now(timezone.utc)
+        date2 = date1 - timedelta(days=1)
+        page1 = [_make_topic(i, f"Topic{i}", date1) for i in range(100)]
+        page2 = [_make_topic(200, "Last", date2)]
+        client = self._make_client()
+        client.side_effect = [SimpleNamespace(topics=page1), SimpleNamespace(topics=page2)]
+
+        result = asyncio.run(get_forum_topics(client, -100123))
+
+        assert len(result) == 101
+        assert result[-1]["id"] == 200
+
+    def test_empty_result(self):
+        client = self._make_client()
+        client.return_value = SimpleNamespace(topics=[])
+
+        result = asyncio.run(get_forum_topics(client, -100123))
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# save_topics_list
+# ---------------------------------------------------------------------------
+
+class TestSaveTopicsList:
+    def test_creates_csv_named_with_group_id_and_date(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        today = datetime.now().strftime("%Y-%m-%d")
+        topic = _make_topic(1, "General", datetime.now(timezone.utc))
+        client = AsyncMock()
+        client.get_input_entity.return_value = "peer"
+        client.return_value = SimpleNamespace(topics=[topic])
+
+        asyncio.run(save_topics_list(client, -100123456))
+
+        files = list(tmp_path.glob(f"topics_-100123456_{today}.csv"))
+        assert len(files) == 1

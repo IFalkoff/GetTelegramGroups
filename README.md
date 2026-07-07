@@ -70,6 +70,7 @@ python src/main.py
 usage: main.py [-h] [--period {1,2,3,4,5,6,7,10,14,21,30}]
                [--mode {groups,contacts,both}] [--list] [--new]
                [--id CHAT_ID] [--ids CHAT_ID [CHAT_ID ...]] [--ids-file FILE]
+               [--topics GROUP_ID]
 ```
 
 ---
@@ -183,6 +184,21 @@ python src/main.py --new --period 14 --mode contacts
 
 ---
 
+#### 5. Темы форума супергруппы (`--topics`)
+
+Некоторые супергруппы работают в режиме **Forum** (темы/topics) — например, "МОНИТОРИНГ/АДМИН/ЦУиМ/СМР" внутри одной группы. Это не отдельные чаты: у всех тем один и тот же ID группы, различаются они только `topic_id`. Флаг `--topics` выгружает список тем супергруппы с их ID.
+
+```bash
+python src/main.py --topics -1001645934290
+```
+
+Результат:
+- `topics_-1001645934290_2026-07-07.csv` — поля: `id`, `title`, `created`, `closed`
+
+Поле `id` в этом файле — это `topic_id` темы, а не ID отдельного чата. Выгрузка сообщений по конкретной теме (`--id`/`--ids` с `reply_to=topic_id`) пока не реализована.
+
+---
+
 ## Структура выходных файлов
 
 ```
@@ -193,6 +209,7 @@ python src/main.py --new --period 14 --mode contacts
 ├── active_contacts_YYYY-MM-DD_Nd.csv   # активные контакты за N дней
 ├── new_groups_YYYY-MM-DD_Nd.csv        # новые группы за N дней
 ├── new_contacts_YYYY-MM-DD_Nd.csv      # новые контакты за N дней
+├── topics_<GROUP_ID>_YYYY-MM-DD.csv    # темы форума супергруппы
 ├── archives/
 │   ├── groups/
 │   │   ├── Название_группы.json        # архив сообщений
@@ -260,4 +277,4 @@ python src/main.py --new --period 14 --mode contacts
 python -m pytest tests/ -v
 ```
 
-Покрытие: `is_fresh`, `_archive_path`, `_message_type`, `parse_args`, `fetch_all_dialogs`, `get_active_groups`, `get_active_contacts`, `get_new_groups`, `get_new_contacts`, `get_message_archive`, `_read_ids_file`, `save_active_lists`, `save_new_lists`.
+Покрытие: `is_fresh`, `_archive_path`, `_message_type`, `parse_args`, `fetch_all_dialogs`, `get_active_groups`, `get_active_contacts`, `get_new_groups`, `get_new_contacts`, `get_message_archive`, `get_forum_topics`, `_read_ids_file`, `save_active_lists`, `save_new_lists`, `save_topics_list`.
