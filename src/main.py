@@ -437,6 +437,33 @@ async def save_active_lists(
         log.info("Saved %d active contacts -> %s", len(contacts), path)
 
 
+async def save_all_lists(
+    client: TelegramClient,
+    mode: str = "both",
+) -> None:
+    """Сохраняет CSV-списки всех групп и/или контактов вне зависимости от активности.
+
+    Args:
+        client: Авторизованный экземпляр TelegramClient.
+        mode: Что выгружать — ``"groups"``, ``"contacts"`` или ``"both"``.
+    """
+    groups, contacts = await fetch_all_dialogs(client)
+
+    if mode in ("groups", "both"):
+        with open(GROUPS_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name"])
+            writer.writeheader()
+            writer.writerows(groups)
+        log.info("Saved %d groups -> %s", len(groups), GROUPS_CSV)
+
+    if mode in ("contacts", "both"):
+        with open(CONTACTS_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name"])
+            writer.writeheader()
+            writer.writerows(contacts)
+        log.info("Saved %d contacts -> %s", len(contacts), CONTACTS_CSV)
+
+
 async def save_new_lists(
     client: TelegramClient,
     period: Period = 1,
@@ -531,6 +558,11 @@ def parse_args() -> argparse.Namespace:
         help="Save newly created groups/contacts to dated CSV files (respects --period and --mode).",
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Save full groups/contacts lists to groups.csv/contacts.csv, regardless of activity (respects --mode).",
+    )
+    parser.add_argument(
         "--id",
         type=int,
         metavar="CHAT_ID",
@@ -574,6 +606,10 @@ async def main() -> None:
 
         if args.new:
             await save_new_lists(client, period=args.period, mode=args.mode)
+            return
+
+        if args.all:
+            await save_all_lists(client, mode=args.mode)
             return
 
         if args.topics is not None:

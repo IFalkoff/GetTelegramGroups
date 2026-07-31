@@ -24,6 +24,7 @@ from main import (
     is_fresh,
     parse_args,
     save_active_lists,
+    save_all_lists,
     save_new_lists,
     save_topics_list,
 )
@@ -575,6 +576,50 @@ class TestSaveNewLists:
         asyncio.run(save_new_lists(client, period=1, mode="both"))
         assert len(list(tmp_path.glob("new_groups_*.csv"))) == 1
         assert len(list(tmp_path.glob("new_contacts_*.csv"))) == 1
+
+
+# ---------------------------------------------------------------------------
+# save_all_lists
+# ---------------------------------------------------------------------------
+
+class TestSaveAllLists:
+    def test_creates_groups_csv_regardless_of_activity(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from telethon.tl.types import Channel
+
+        ch = MagicMock(spec=Channel); ch.id = 1
+        old = datetime.now(timezone.utc) - timedelta(days=365)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([_make_dialog(ch, "G", old)])
+        asyncio.run(save_all_lists(client, mode="groups"))
+        assert (tmp_path / "groups.csv").exists()
+
+    def test_creates_contacts_csv_regardless_of_activity(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from telethon.tl.types import User
+
+        u = MagicMock(spec=User); u.bot = False; u.id = 2
+        old = datetime.now(timezone.utc) - timedelta(days=365)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([_make_dialog(u, "C", old)])
+        asyncio.run(save_all_lists(client, mode="contacts"))
+        assert (tmp_path / "contacts.csv").exists()
+
+    def test_mode_groups_only_creates_groups_csv(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_all_lists(client, mode="groups"))
+        assert (tmp_path / "groups.csv").exists()
+        assert not (tmp_path / "contacts.csv").exists()
+
+    def test_mode_both_creates_two_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        client = MagicMock()
+        client.iter_dialogs.return_value = _aiter([])
+        asyncio.run(save_all_lists(client, mode="both"))
+        assert (tmp_path / "groups.csv").exists()
+        assert (tmp_path / "contacts.csv").exists()
 
 
 # ---------------------------------------------------------------------------

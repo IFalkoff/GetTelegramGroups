@@ -68,7 +68,7 @@ python src/main.py
 
 ```
 usage: main.py [-h] [--period {1,2,3,4,5,6,7,10,14,21,30}]
-               [--mode {groups,contacts,both}] [--list] [--new]
+               [--mode {groups,contacts,both}] [--list] [--new] [--all]
                [--id CHAT_ID] [--ids CHAT_ID [CHAT_ID ...]] [--ids-file FILE]
                [--topics GROUP_ID]
 ```
@@ -161,7 +161,30 @@ python src/main.py --list --mode contacts
 
 ---
 
-#### 4. Список новых групп и контактов (`--new`)
+#### 4. Полный список всех групп и контактов (`--all`)
+
+Сохраняет CSV-файлы со всеми группами/контактами независимо от того, была ли в них активность.
+
+```bash
+# Все группы и контакты
+python src/main.py --all
+
+# Только все группы
+python src/main.py --all --mode groups
+
+# Только все контакты
+python src/main.py --all --mode contacts
+```
+
+Результат:
+- `groups.csv` — поля: `id`, `name`
+- `contacts.csv` — поля: `id`, `name`
+
+Файлы перезаписываются при каждом запуске (без даты в имени).
+
+---
+
+#### 5. Список новых групп и контактов (`--new`)
 
 Сохраняет CSV-файлы с группами/контактами, которые появились за период:
 - **Группы** — дата создания группы/канала попадает в период
@@ -184,7 +207,7 @@ python src/main.py --new --period 14 --mode contacts
 
 ---
 
-#### 5. Темы форума супергруппы (`--topics`)
+#### 6. Темы форума супергруппы (`--topics`)
 
 Некоторые супергруппы работают в режиме **Forum** (темы/topics) — например, "МОНИТОРИНГ/АДМИН/ЦУиМ/СМР" внутри одной группы. Это не отдельные чаты: у всех тем один и тот же ID группы, различаются они только `topic_id`. Флаг `--topics` выгружает список тем супергруппы с их ID.
 
@@ -277,4 +300,4 @@ python src/main.py --topics -1001645934290
 python -m pytest tests/ -v
 ```
 
-Покрытие: `is_fresh`, `_archive_path`, `_message_type`, `parse_args`, `fetch_all_dialogs`, `get_active_groups`, `get_active_contacts`, `get_new_groups`, `get_new_contacts`, `get_message_archive`, `get_forum_topics`, `_read_ids_file`, `save_active_lists`, `save_new_lists`, `save_topics_list`.
+Покрытие: `is_fresh`, `_archive_path`, `_message_type`, `parse_args`, `fetch_all_dialogs`, `get_active_groups`, `get_active_contacts`, `get_new_groups`, `get_new_contacts`, `get_message_archive`, `get_forum_topics`, `_read_ids_file`, `save_active_lists`, `save_new_lists`, `save_all_lists`, `save_topics_list`.
