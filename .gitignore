@@ -16,6 +16,10 @@ __pycache__/
 # VS Code
 .vscode/
 
+# JetBrains / PyCharm
+.idea/
+
+
 # Output data
 *.csv
 ids*.txt
